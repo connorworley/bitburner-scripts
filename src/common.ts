@@ -1,9 +1,9 @@
 import { NS } from "ns2";
 
-export function walkServersWithCtx<Ctx>(
+export async function walkServersWithCtx<Ctx>(
     ns: NS,
     initialHostname: string,
-    callback: (hostname: string, ctx: Ctx) => Ctx,
+    callback: (hostname: string, ctx: Ctx) => Promise<Ctx>,
     initialCtx: Ctx,
 ) {
     const stack: [string, Ctx][] = [[initialHostname, initialCtx]];
@@ -12,7 +12,7 @@ export function walkServersWithCtx<Ctx>(
         const [hostname, ctx] = stack.pop()!;
         if (visitedHostnames.has(hostname))
             continue;
-        const newCtx = callback(hostname, ctx);
+        const newCtx = await callback(hostname, ctx);
         stack.push(
             ...ns.scan(hostname).map<[string, Ctx]>(
                 childHostname => [childHostname, newCtx]
@@ -22,16 +22,16 @@ export function walkServersWithCtx<Ctx>(
     }
 }
 
-export function walkServers(
+export async function walkServers(
     ns: NS,
     initialHostname: string,
-    callback: (hostname: string) => void,
+    callback: (hostname: string) => Promise<void>,
 ) {
     return walkServersWithCtx<null>(
         ns,
         initialHostname,
-        (hostname: string, ctx: null) => {
-            callback(hostname);
+        async (hostname: string, ctx: null) => {
+            await callback(hostname);
             return null;
         },
         null,

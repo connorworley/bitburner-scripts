@@ -1,5 +1,21 @@
 import { NS, Player, Server } from "ns2";
-import { walkServers } from "./common";
+import { walkServers, walkServersWithCtx } from "./common";
+
+
+const HOSTNAMES_TO_BACKDOOR = new Set(["CSEC", "avmnite-02h", "I.I.I.I", "run4theh111z"]);
+const FACTIONS_TO_JOIN = new Set(["CyberSec", "NiteSec", "The Black Hand", "BitRunners"]);
+
+const WORKER_NAME = "_worker";
+const WORKER_MIN_RAM = 2;
+
+const PROGRAMS_TO_BUY = [
+    "BruteSSH.exe",
+    "FTPCrack.exe",
+    "relaySMTP.exe",
+    "HTTPWorm.exe",
+    "SQLInject.exe",
+    "Formulas.exe",
+];
 
 interface ThreadCounts {
     hackThreads: number;
@@ -45,7 +61,6 @@ function getGrowTime(ns: NS, server: Server, player: Player): number {
 }
 
 function getHackMoneyDecrease(ns: NS, server: Server, player: Player, hackThreads: number = 1): number {
-    // TODO: Is there any benefit to using formulas?
     return (
         server.moneyAvailable
         * hackThreads
@@ -133,6 +148,26 @@ function root(ns: NS, hostname: string): boolean {
     return true;
 }
 
+function purchaseUpgrades(ns: NS) {
+    ns.singularity.upgradeHomeRam();
+
+    ns.purchaseServer(WORKER_NAME, WORKER_MIN_RAM);
+    ns.getPurchasedServers().forEach(
+        server => ns.upgradePurchasedServer(server, ns.getServerMaxRam(server) * 2)
+    );
+
+    if(ns.singularity.purchaseTor())
+        PROGRAMS_TO_BUY.forEach(ns.singularity.purchaseProgram);
+}
+
+function joinFactions(ns: NS) {
+    ns.singularity.checkFactionInvitations().filter(
+        faction => FACTIONS_TO_JOIN.has(faction)
+    ).forEach(
+        ns.singularity.joinFaction
+    );
+}
+
 export async function main(ns: NS) {
     const player = ns.getPlayer();
     const candidateServers: Server[] = [];
@@ -143,13 +178,13 @@ export async function main(ns: NS) {
         ns.getScriptRam("/worker/grow.js", "home"),        
     );
 
-    walkServers(
+    await walkServers(
         ns,
         "home",
-        (hostname: string) => {
+        async (hostname: string) => {
             pushWorkerFiles(ns, hostname);
 
-            if (!ns.hasRootAccess(hostname))
+            if (!ns.hasRootAccess(hostname) || hostname == "home" || hostname.startsWith("_worker"))
                 return;
 
             const server = ns.getServer(hostname);
@@ -192,14 +227,23 @@ export async function main(ns: NS) {
         let newServersRooted = false;
         const freeThreadsByHostname = new Map<string, number>();
 
-        walkServers(
+        await walkServersWithCtx<string[]>(
             ns,
             "home",
-            (hostname: string) => {
+            async (hostname, ancestors) => {
+                const path = [...ancestors, hostname];
+
                 if (!ns.hasRootAccess(hostname)) {
                     if (!root(ns, hostname))
-                        return;
+                        return path;
                     newServersRooted = true;
+                }
+
+                // TODO: Function
+                if (!ns.getServer(hostname).backdoorInstalled && HOSTNAMES_TO_BACKDOOR.has(hostname)) {
+                    path.forEach(ns.singularity.connect);
+                    await ns.singularity.installBackdoor();
+                    path.slice().reverse().forEach(ns.singularity.connect);
                 }
 
                 // TODO: Discover and solve contracts
@@ -210,8 +254,16 @@ export async function main(ns: NS) {
                 );
                 if (freeThreads > 0)
                     freeThreadsByHostname.set(hostname, freeThreads);
+
+                return path;
             },
+            [],
         );
+
+
+        purchaseUpgrades(ns);
+        // TODO: Handle augment work/upgrades
+        joinFactions(ns);
 
         if (newServersRooted)
             ns.spawn("bitburner.js", 1, ...ns.args);
@@ -251,7 +303,10 @@ export async function main(ns: NS) {
         };
 
         // TODO: Perhaps move this to a function
-        const scheduleThreads = (threadCount: number, cb: (scheduledHostname: string, scheduledThreadCount: number) => void) => {
+        const scheduleThreads = (
+            threadCount: number,
+            cb: (scheduledHostname: string, scheduledThreadCount: number) => void,
+        ) => {
             let remainingThreadCount = threadCount;
             while (remainingThreadCount > 0) {
                 const nextServer = freeThreadsByHostname.keys().next().value;
