@@ -3,11 +3,11 @@
   "version": "1.0.0",
   "private": true,
   "devDependencies": {
-    "bitburner": "https://github.com/bitburner-official/bitburner-src#v2.2.2",
+    "bitburner-filesync": "^1.1.5",
+    "concurrently": "^8.0.1",
     "typescript": "^5.0.4"
   },
   "scripts": {
-    "build": "tsc -p .",
-    "watch": "tsc -p . --watch"
+    "watch": "concurrently \"bitburner-filesync\" \"tsc --project . --watch\""
   }
 }
